@@ -2,10 +2,13 @@ import os
 import time
 import numpy as np
 from typing import Dict, Iterable, List, Tuple
+import tiktoken
 from tqdm import tqdm
 
 from cs336_basics import train_bpe
-from cs336_basics.train_bpe import parallel_preprocess_from_file, pre_tokenize
+from cs336_basics.train_bpe import parallel_preprocess_from_file, pre_tokenize, pre_tokenize_iter
+from tests.common import FIXTURES_PATH
+from tests.test_tokenizer import MERGES_PATH, VOCAB_PATH, get_tokenizer_from_vocab_merges_path
 
 class BPETokenizer:
     def __init__(self, vocab:Dict[int, bytes], merges:List[Tuple[bytes, bytes]], special_tokens:List[str] = None) -> None:
@@ -57,7 +60,25 @@ class BPETokenizer:
                 print(f"Warning: Token {part} not found in vocabulary.")
                 pass
         return token_ids
-    
+
+    def encode_iterable(self, iterable: Iterable[str]) -> Iterable[int]:
+        """
+        对可迭代对象（例如文件句柄）中的每个文本进行编码，每次调用返回一个token ID
+        """
+        words_iter = pre_tokenize_iter(iterable, self.special_tokens)
+        for word in words_iter:
+            if word in self.token_to_id:
+                # 如果是特殊token/其他单token，直接返回对应的ID
+                yield self.token_to_id[word]
+            elif word in self.word_to_ids:
+                # 如果已经计算过这个词，直接使用缓存
+                yield from self.word_to_ids[word]
+            else:
+                # 计算该词对应token ID序列
+                token_ids = self.calculate_token_ids(word)
+                self.word_to_ids[word] = token_ids
+                yield from token_ids
+
     def encode(self, text:str) -> List[int]:
         """
         将文本编码为BPE token ID列表
@@ -97,29 +118,44 @@ class BPETokenizer:
         return text_bytes.decode('utf-8', errors='ignore')
 
 if __name__ == "__main__":
-    # 示例：使用并行预分词训练BPE
-    file_path = "data/TinyStoriesV2-GPT4-valid.txt"  # 数据集文件路径
-    special_tokens = ["<|endoftext|>"]
-    # 并行预分词
-    start_time = time.time()
-    pre_token_freq = parallel_preprocess_from_file(
-        file_path=file_path,
-        special_tokens=special_tokens,
-        desired_num_chunks=4  # 使用8个进程
-    )
-    end_time = time.time()
-    print(f"并行预分词时间: {end_time - start_time}秒")
+    # # 示例：使用并行预分词训练BPE
+    # file_path = "data/TinyStoriesV2-GPT4-valid.txt"  # 数据集文件路径
+    # special_tokens = ["<|endoftext|>"]
+    # # 并行预分词
+    # start_time = time.time()
+    # pre_token_freq = parallel_preprocess_from_file(
+    #     file_path=file_path,
+    #     special_tokens=special_tokens,
+    #     desired_num_chunks=4  # 使用8个进程
+    # )
+    # end_time = time.time()
+    # print(f"并行预分词时间: {end_time - start_time}秒")
     
-    # 训练BPE
-    start_time = time.time()
-    vocab, merges = train_bpe(
-        vocab_size=500,
-        special_tokens=special_tokens,
-        pre_token_freq=pre_token_freq  # 传入预计算的频率
-    )
-    end_time = time.time()
-    print(f"BPE训练时间: {end_time - start_time}秒")
+    # # 训练BPE
+    # start_time = time.time()
+    # vocab, merges = train_bpe(
+    #     vocab_size=500,
+    #     special_tokens=special_tokens,
+    #     pre_token_freq=pre_token_freq  # 传入预计算的频率
+    # )
+    # end_time = time.time()
+    # print(f"BPE训练时间: {end_time - start_time}秒")
 
-    tokenizer = BPETokenizer(vocab, merges, special_tokens)
-    print(tokenizer.encode("Hello, world! <|endoftext|> This is a test."))
-    print(tokenizer.decode(tokenizer.encode("Hello, world! <|endoftext|> This is a test.")))
+    # tokenizer = BPETokenizer(vocab, merges, special_tokens)
+    # print(tokenizer.encode("Hello, world! <|endoftext|> This is a test."))
+    # print(tokenizer.decode(tokenizer.encode("Hello, world! <|endoftext|> This is a test.")))
+
+    tokenizer = get_tokenizer_from_vocab_merges_path(
+        vocab_path=VOCAB_PATH,
+        merges_path=MERGES_PATH,
+        special_tokens=["<|endoftext|>", "<|endoftext|><|endoftext|>"],
+    )
+    test_string = "Hello, how <|endoftext|><|endoftext|> are you?<|endoftext|>"
+
+    ids = tokenizer.encode(test_string)
+    tokenized_string = [tokenizer.decode([x]) for x in ids]
+    # Ensure the double <|endoftext|><|endoftext|> is preserved as a single token
+    assert tokenized_string.count("<|endoftext|>") == 1
+    assert tokenized_string.count("<|endoftext|><|endoftext|>") == 1
+    # Test roundtrip
+    assert tokenizer.decode(ids) == test_string

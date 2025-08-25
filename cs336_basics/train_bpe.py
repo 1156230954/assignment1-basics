@@ -170,28 +170,58 @@ def pre_tokenize_file(
         f.seek(start)
         chunk_bytes = f.read(end - start)
     chunk_text = chunk_bytes.decode("utf-8", errors="ignore")
-    return pre_tokenize(chunk_text, special_tokens)
+    return get_pre_token_freq(chunk_text, special_tokens)
 
 
-def pre_tokenize(
+def get_pre_token_freq(
     text,
     special_tokens
 ):
-    # 按特殊令牌拆分，避免跨令牌合并
-    special_pattern = re.compile("|".join(re.escape(t) for t in special_tokens))
-    text_blocks = special_pattern.split(text)
-
-    # 预分词并统计频率
+    # 获取预分词列表
+    pre_tokens = pre_tokenize(text, special_tokens)
+    
+    # 统计频率
     pre_token_freq = defaultdict(int)
+    for token_bytes in pre_tokens:
+        pre_token_freq[token_bytes] += 1
+    
+    return pre_token_freq
+
+def pre_tokenize_iter(texts, special_tokens):
+    sorted_tokens = sorted(special_tokens, key=lambda x: len(x), reverse=True)
+    special_pattern = special_pattern = "|".join(re.escape(token) for token in sorted_tokens) if special_tokens else r"(?!)"
+    for text in texts:
+            # 首先按特殊token进行分割
+            text_blocks = re.split(f'({special_pattern})', text)
+            
+            for block in text_blocks:
+                if block in special_tokens:
+                    # 特殊token直接生成
+                    yield block.encode('utf-8')
+                elif block:  # 跳过空字符串
+                    # 对普通文本使用word_pattern进行分词并生成
+                    for match in re.finditer(PAT, block):
+                        yield match.group(0).encode('utf-8')
+
+def pre_tokenize(text, special_tokens):
+    # 按特殊令牌拆分，避免跨令牌合并
+    sorted_tokens = sorted(special_tokens, key=lambda x: len(x), reverse=True)
+    special_pattern = special_pattern = "|".join(re.escape(token) for token in sorted_tokens) if special_tokens else r"(?!)"
+    text_blocks = re.split(f'({special_pattern})', text)
+
+    pre_tokens = []
     for block in text_blocks:
-        if not block.strip():
+        if block in special_tokens:
+            pre_tokens.append(block.encode('utf-8'))
             continue
         for match in re.finditer(PAT, block):
             pre_token = match.group()
-            # 转换为字节元组（用于后续BPE合并）
+            # 转换为字节序列（用于后续BPE合并）
             token_bytes = pre_token.encode("utf-8")
-            pre_token_freq[token_bytes] += 1
-    return pre_token_freq
+            pre_tokens.append(token_bytes)
+    
+    return pre_tokens
+    
 
 if __name__ == "__main__":
     import cProfile

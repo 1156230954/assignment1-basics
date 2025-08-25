@@ -5,6 +5,7 @@ import time
 
 from cs336_basics.pretokenization_example import find_chunk_boundaries
 from cs336_basics.bytes_utils import init_byte_cache, create_byte_pair, merge_bytes
+from tests.common import FIXTURES_PATH
 
 
 # 正则表达式，用于预分词
@@ -157,6 +158,10 @@ def parallel_preprocess_from_file(
     for freq in results:
         for token_bytes, count in freq.items():
             total_freq[token_bytes] += count
+    # 4. 特殊token不参与训练
+    for special_token in special_tokens:
+        if special_token.encode("utf-8") in total_freq:
+            del total_freq[special_token.encode("utf-8")]
     return total_freq
 
 # 单进程处理分块的预分词逻辑
@@ -198,8 +203,7 @@ def pre_tokenize_iter(texts, special_tokens):
                 if block in special_tokens:
                     # 特殊token直接生成
                     yield block.encode('utf-8')
-                elif block:  # 跳过空字符串
-                    # 对普通文本使用word_pattern进行分词并生成
+                elif block:  
                     for match in re.finditer(PAT, block):
                         yield match.group(0).encode('utf-8')
 
@@ -214,11 +218,9 @@ def pre_tokenize(text, special_tokens):
         if block in special_tokens:
             pre_tokens.append(block.encode('utf-8'))
             continue
-        for match in re.finditer(PAT, block):
-            pre_token = match.group()
-            # 转换为字节序列（用于后续BPE合并）
-            token_bytes = pre_token.encode("utf-8")
-            pre_tokens.append(token_bytes)
+        elif block:
+            tokens = [match.group(0).encode('utf-8') for match in re.finditer(PAT, block)]
+            pre_tokens.extend(tokens)
     
     return pre_tokens
     

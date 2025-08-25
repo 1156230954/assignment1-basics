@@ -28,7 +28,7 @@ def get_pair_frequencies(pre_token_freq) :
     for token_bytes, count in pre_token_freq.items():
         # 遍历令牌内的相邻字节对（如(l,o,w)→(l,o)、(o,w)）
         for i in range(len(token_bytes) - 1):
-            pair = get_pair(token_bytes, i)
+            pair = get_pair_cached(token_bytes, i)
             pair_freq[pair] += count  # 累加频率（预令牌出现次数×1）
     return pair_freq
 
@@ -41,6 +41,9 @@ def train_bpe(
     训练BPE分词器：
     返回：词汇表（ID→字节）和合并历史
     """
+    # 初始化字节缓存，避免重复的isinstance检查
+    _init_byte_cache()
+    
     # 初始化词汇表
     vocab = init_vocab(special_tokens)
     current_vocab_size = len(vocab)
@@ -66,10 +69,11 @@ def train_bpe(
         
         for token_bytes, count in pre_token_freq.items():
             # 检查当前令牌是否包含最佳合并对
-            contains_best_pair = any(
-                get_pair(token_bytes, i) == best_pair
-                for i in range(len(token_bytes) - 1)
-            )
+            contains_best_pair = False
+            for i in range(len(token_bytes) - 1):
+                if get_pair(token_bytes, i) == best_pair:
+                    contains_best_pair = True
+                    break
             
             if not contains_best_pair:
                 new_pre_token_freq[token_bytes] += count
@@ -96,7 +100,7 @@ def train_bpe(
         # 3.1 移除受影响旧令牌中的字节对
         for token_bytes, count in affected_old_tokens:
             for i in range(len(token_bytes) - 1):
-                pair = pair = get_pair(token_bytes, i)
+                pair = get_pair(token_bytes, i)
                 pair_freq[pair] -= count
                 if pair_freq[pair] <= 0:
                     del pair_freq[pair]
@@ -120,13 +124,36 @@ def train_bpe(
     return vocab,merges
 
 def get_pair(token_bytes, i):
-    a = bytes([token_bytes[i]]) if isinstance(token_bytes[i], int) else token_bytes[i]
-    b = bytes([token_bytes[i+1]]) if isinstance(token_bytes[i+1], int) else token_bytes[i+1]
+    # 使用预计算的类型映射，避免重复isinstance检查
+    a = _byte_cache.get(token_bytes[i], token_bytes[i])
+    b = _byte_cache.get(token_bytes[i+1], token_bytes[i+1])
     return (a, b)
 
+# 预计算字节类型映射，避免重复的isinstance检查
+_byte_cache = {}
+def _init_byte_cache():
+    """初始化字节缓存，将int类型的字节值预转换为bytes对象"""
+    for i in range(256):
+        _byte_cache[i] = bytes([i])
+
+# 缓存常用的字节对，避免重复创建
+_pair_cache = {}
+def get_pair_cached(token_bytes, i):
+    """带缓存的字节对获取函数"""
+    key = (token_bytes[i], token_bytes[i+1])
+    if key not in _pair_cache:
+        _pair_cache[key] = (bytes([token_bytes[i]]), bytes([token_bytes[i+1]]))
+    return _pair_cache[key]
+
+# 使用更高效的字节对创建
+def get_pair_fast(token_bytes, i):
+    """快速字节对获取，直接使用缓存"""
+    return _byte_cache.get(token_bytes[i], token_bytes[i]), _byte_cache.get(token_bytes[i+1], token_bytes[i+1])
+
 def merge_bytes(token_bytes, i):
-    a = bytes([token_bytes[i]]) if isinstance(token_bytes[i], int) else token_bytes[i]
-    b = bytes([token_bytes[i+1]]) if isinstance(token_bytes[i+1], int) else token_bytes[i+1]
+    # 使用预计算的类型映射，避免重复isinstance检查
+    a = _byte_cache.get(token_bytes[i], token_bytes[i])
+    b = _byte_cache.get(token_bytes[i+1], token_bytes[i+1])
     return a + b
 
 # 并行预分词主函数
@@ -191,9 +218,17 @@ def pre_tokenize(
     return pre_token_freq
 
 if __name__ == "__main__":
+    import cProfile
+    import pstats
+    
     # 示例：使用并行预分词训练BPE
     file_path = "data/TinyStoriesV2-GPT4-valid.txt"  # 数据集文件路径
     special_tokens = ["<|endoftext|>"]
+    
+    # 创建性能分析器
+    profiler = cProfile.Profile()
+    profiler.enable()
+    
     # 并行预分词
     start_time = time.time()
     pre_token_freq = parallel_preprocess_from_file(
@@ -203,6 +238,7 @@ if __name__ == "__main__":
     )
     end_time = time.time()
     print(f"并行预分词时间: {end_time - start_time}秒")
+    
     # 训练BPE
     start_time = time.time()
     vocab, merges = train_bpe(
@@ -212,3 +248,23 @@ if __name__ == "__main__":
     )
     end_time = time.time()
     print(f"BPE训练时间: {end_time - start_time}秒")
+    
+    # 停止性能分析器
+    profiler.disable()
+    
+    # 创建性能统计对象
+    stats = pstats.Stats(profiler)
+    
+    # 打印性能统计信息
+    print("\n=== 性能分析结果 ===")
+    print("按累计时间排序的前20个函数:")
+    stats.sort_stats('cumulative').print_stats(20)
+    
+    print("\n=== 关键函数性能统计 ===")
+    print("train_bpe函数统计:")
+    stats.sort_stats('cumulative').print_stats('train_bpe')
+    
+    print("\n=== 字节对相关函数统计 ===")
+    stats.sort_stats('cumulative').print_stats('get_pair')
+    stats.sort_stats('cumulative').print_stats('merge_bytes')
+    stats.sort_stats('cumulative').print_stats('get_pair_frequencies')

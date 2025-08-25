@@ -4,6 +4,7 @@ from collections import defaultdict
 import time
 
 from cs336_basics.pretokenization_example import find_chunk_boundaries
+from cs336_basics.bytes_utils import init_byte_cache, create_byte_pair, merge_bytes
 
 
 # 正则表达式，用于预分词
@@ -28,7 +29,7 @@ def get_pair_frequencies(pre_token_freq) :
     for token_bytes, count in pre_token_freq.items():
         # 遍历令牌内的相邻字节对（如(l,o,w)→(l,o)、(o,w)）
         for i in range(len(token_bytes) - 1):
-            pair = get_pair_cached(token_bytes, i)
+            pair = create_byte_pair(token_bytes, i)
             pair_freq[pair] += count  # 累加频率（预令牌出现次数×1）
     return pair_freq
 
@@ -42,7 +43,7 @@ def train_bpe(
     返回：词汇表（ID→字节）和合并历史
     """
     # 初始化字节缓存，避免重复的isinstance检查
-    _init_byte_cache()
+    init_byte_cache()
     
     # 初始化词汇表
     vocab = init_vocab(special_tokens)
@@ -71,7 +72,7 @@ def train_bpe(
             # 检查当前令牌是否包含最佳合并对
             contains_best_pair = False
             for i in range(len(token_bytes) - 1):
-                if get_pair(token_bytes, i) == best_pair:
+                if create_byte_pair(token_bytes, i) == best_pair:
                     contains_best_pair = True
                     break
             
@@ -86,7 +87,7 @@ def train_bpe(
             new_tokens = []
             i = 0
             while i < len(token_bytes):
-                if i < len(token_bytes) - 1 and get_pair(token_bytes, i) == best_pair:
+                if i < len(token_bytes) - 1 and create_byte_pair(token_bytes, i) == best_pair:
                     merged = merge_bytes(token_bytes, i)
                     new_tokens.append(merged)
                     i += 2
@@ -100,7 +101,7 @@ def train_bpe(
         # 3.1 移除受影响旧令牌中的字节对
         for token_bytes, count in affected_old_tokens:
             for i in range(len(token_bytes) - 1):
-                pair = get_pair(token_bytes, i)
+                pair = create_byte_pair(token_bytes, i)
                 pair_freq[pair] -= count
                 if pair_freq[pair] <= 0:
                     del pair_freq[pair]
@@ -110,7 +111,7 @@ def train_bpe(
             # 只处理新生成的令牌（旧令牌已保留，无需重复计算）
             if token_bytes not in pre_token_freq:
                 for i in range(len(token_bytes) - 1):
-                    pair = get_pair(token_bytes, i)                    
+                    pair = create_byte_pair(token_bytes, i)                    
                     pair_freq[pair] += count
 
         # 4. 更新词汇表和合并历史
@@ -123,38 +124,7 @@ def train_bpe(
     
     return vocab,merges
 
-def get_pair(token_bytes, i):
-    # 使用预计算的类型映射，避免重复isinstance检查
-    a = _byte_cache.get(token_bytes[i], token_bytes[i])
-    b = _byte_cache.get(token_bytes[i+1], token_bytes[i+1])
-    return (a, b)
 
-# 预计算字节类型映射，避免重复的isinstance检查
-_byte_cache = {}
-def _init_byte_cache():
-    """初始化字节缓存，将int类型的字节值预转换为bytes对象"""
-    for i in range(256):
-        _byte_cache[i] = bytes([i])
-
-# 缓存常用的字节对，避免重复创建
-_pair_cache = {}
-def get_pair_cached(token_bytes, i):
-    """带缓存的字节对获取函数"""
-    key = (token_bytes[i], token_bytes[i+1])
-    if key not in _pair_cache:
-        _pair_cache[key] = (bytes([token_bytes[i]]), bytes([token_bytes[i+1]]))
-    return _pair_cache[key]
-
-# 使用更高效的字节对创建
-def get_pair_fast(token_bytes, i):
-    """快速字节对获取，直接使用缓存"""
-    return _byte_cache.get(token_bytes[i], token_bytes[i]), _byte_cache.get(token_bytes[i+1], token_bytes[i+1])
-
-def merge_bytes(token_bytes, i):
-    # 使用预计算的类型映射，避免重复isinstance检查
-    a = _byte_cache.get(token_bytes[i], token_bytes[i])
-    b = _byte_cache.get(token_bytes[i+1], token_bytes[i+1])
-    return a + b
 
 # 并行预分词主函数
 def parallel_preprocess_from_file(
@@ -180,7 +150,7 @@ def parallel_preprocess_from_file(
             for start, end in chunk_ranges
         ]
         # 并行执行
-        results = pool.starmap(pre_tokenize, tasks)
+        results = pool.starmap(pre_tokenize_file, tasks)
 
     # 3. 合并所有分块的频率
     total_freq = defaultdict(int)
@@ -190,7 +160,7 @@ def parallel_preprocess_from_file(
     return total_freq
 
 # 单进程处理分块的预分词逻辑
-def pre_tokenize(
+def pre_tokenize_file(
     file_path,
     start,
     end,
@@ -200,10 +170,16 @@ def pre_tokenize(
         f.seek(start)
         chunk_bytes = f.read(end - start)
     chunk_text = chunk_bytes.decode("utf-8", errors="ignore")
+    return pre_tokenize(chunk_text, special_tokens)
 
+
+def pre_tokenize(
+    text,
+    special_tokens
+):
     # 按特殊令牌拆分，避免跨令牌合并
     special_pattern = re.compile("|".join(re.escape(t) for t in special_tokens))
-    text_blocks = special_pattern.split(chunk_text)
+    text_blocks = special_pattern.split(text)
 
     # 预分词并统计频率
     pre_token_freq = defaultdict(int)
@@ -259,12 +235,3 @@ if __name__ == "__main__":
     print("\n=== 性能分析结果 ===")
     print("按累计时间排序的前20个函数:")
     stats.sort_stats('cumulative').print_stats(20)
-    
-    print("\n=== 关键函数性能统计 ===")
-    print("train_bpe函数统计:")
-    stats.sort_stats('cumulative').print_stats('train_bpe')
-    
-    print("\n=== 字节对相关函数统计 ===")
-    stats.sort_stats('cumulative').print_stats('get_pair')
-    stats.sort_stats('cumulative').print_stats('merge_bytes')
-    stats.sort_stats('cumulative').print_stats('get_pair_frequencies')

@@ -28,7 +28,7 @@ def get_pair_frequencies(pre_token_freq) :
     for token_bytes, count in pre_token_freq.items():
         # 遍历令牌内的相邻字节对（如(l,o,w)→(l,o)、(o,w)）
         for i in range(len(token_bytes) - 1):
-            pair = (token_bytes[i], token_bytes[i+1])
+            pair = get_pair(token_bytes, i)
             pair_freq[pair] += count  # 累加频率（预令牌出现次数×1）
     return pair_freq
 
@@ -67,7 +67,7 @@ def train_bpe(
         for token_bytes, count in pre_token_freq.items():
             # 检查当前令牌是否包含最佳合并对
             contains_best_pair = any(
-                (token_bytes[i], token_bytes[i+1]) == best_pair
+                get_pair(token_bytes, i) == best_pair
                 for i in range(len(token_bytes) - 1)
             )
             
@@ -82,8 +82,8 @@ def train_bpe(
             new_tokens = []
             i = 0
             while i < len(token_bytes):
-                if i < len(token_bytes) - 1 and (token_bytes[i], token_bytes[i+1]) == best_pair:
-                    merged = token_bytes[i] + token_bytes[i+1]
+                if i < len(token_bytes) - 1 and get_pair(token_bytes, i) == best_pair:
+                    merged = merge_bytes(token_bytes, i)
                     new_tokens.append(merged)
                     i += 2
                 else:
@@ -96,7 +96,7 @@ def train_bpe(
         # 3.1 移除受影响旧令牌中的字节对
         for token_bytes, count in affected_old_tokens:
             for i in range(len(token_bytes) - 1):
-                pair = (token_bytes[i], token_bytes[i+1])
+                pair = pair = get_pair(token_bytes, i)
                 pair_freq[pair] -= count
                 if pair_freq[pair] <= 0:
                     del pair_freq[pair]
@@ -106,18 +106,28 @@ def train_bpe(
             # 只处理新生成的令牌（旧令牌已保留，无需重复计算）
             if token_bytes not in pre_token_freq:
                 for i in range(len(token_bytes) - 1):
-                    pair = (token_bytes[i], token_bytes[i+1])
+                    pair = get_pair(token_bytes, i)                    
                     pair_freq[pair] += count
 
         # 4. 更新词汇表和合并历史
         pre_token_freq = new_pre_token_freq
-        new_token = bytes(best_pair[0]) + bytes(best_pair[1])
+        new_token = best_pair[0] + best_pair[1]
         vocab[current_vocab_size] = new_token
         merges.append(best_pair)
         current_vocab_size += 1
         
     
     return vocab,merges
+
+def get_pair(token_bytes, i):
+    a = bytes([token_bytes[i]]) if isinstance(token_bytes[i], int) else token_bytes[i]
+    b = bytes([token_bytes[i+1]]) if isinstance(token_bytes[i+1], int) else token_bytes[i+1]
+    return (a, b)
+
+def merge_bytes(token_bytes, i):
+    a = bytes([token_bytes[i]]) if isinstance(token_bytes[i], int) else token_bytes[i]
+    b = bytes([token_bytes[i+1]]) if isinstance(token_bytes[i+1], int) else token_bytes[i+1]
+    return a + b
 
 # 并行预分词主函数
 def parallel_preprocess_from_file(
@@ -176,7 +186,7 @@ def pre_tokenize(
         for match in re.finditer(PAT, block):
             pre_token = match.group()
             # 转换为字节元组（用于后续BPE合并）
-            token_bytes = tuple(pre_token.encode("utf-8"))
+            token_bytes = pre_token.encode("utf-8")
             pre_token_freq[token_bytes] += 1
     return pre_token_freq
 
@@ -196,7 +206,7 @@ if __name__ == "__main__":
     # 训练BPE
     start_time = time.time()
     vocab, merges = train_bpe(
-        vocab_size=10,
+        vocab_size=500,
         special_tokens=special_tokens,
         pre_token_freq=pre_token_freq  # 传入预计算的频率
     )

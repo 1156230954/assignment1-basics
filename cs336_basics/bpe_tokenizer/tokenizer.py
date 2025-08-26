@@ -1,9 +1,7 @@
 import time
 from typing import Dict, Iterable, List, Tuple
 
-from cs336_basics import train_bpe
-from cs336_basics.train_bpe import parallel_preprocess_from_file, pre_tokenize, pre_tokenize_iter
-from tests.test_tokenizer import MERGES_PATH, VOCAB_PATH, get_tokenizer_from_vocab_merges_path
+from .train_bpe import parallel_preprocess_from_file, pre_tokenize, pre_tokenize_iter
 
 class BPETokenizer:
     def __init__(self, vocab:Dict[int, bytes], merges:List[Tuple[bytes, bytes]], special_tokens:List[str] = None) -> None:
@@ -114,6 +112,7 @@ class BPETokenizer:
                 break
             
         return text_bytes.decode('utf-8', errors='ignore')
+
 
 if __name__ == "__main__":
     # 示例：使用并行预分词训练BPE

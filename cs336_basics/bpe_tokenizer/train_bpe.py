@@ -3,8 +3,8 @@ import multiprocessing as mp
 from collections import defaultdict
 import time
 
-from cs336_basics.pretokenization_example import find_chunk_boundaries
-from cs336_basics.bytes_utils import init_byte_cache, create_byte_pair, merge_bytes
+from .pretokenization_example import find_chunk_boundaries
+from .bytes_utils import init_byte_cache, create_byte_pair, merge_bytes
 from tests.common import FIXTURES_PATH
 
 

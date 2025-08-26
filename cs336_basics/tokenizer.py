@@ -1,13 +1,8 @@
-import os
 import time
-import numpy as np
 from typing import Dict, Iterable, List, Tuple
-import tiktoken
-from tqdm import tqdm
 
 from cs336_basics import train_bpe
 from cs336_basics.train_bpe import parallel_preprocess_from_file, pre_tokenize, pre_tokenize_iter
-from tests.common import FIXTURES_PATH
 from tests.test_tokenizer import MERGES_PATH, VOCAB_PATH, get_tokenizer_from_vocab_merges_path
 
 class BPETokenizer:
@@ -22,9 +17,9 @@ class BPETokenizer:
 
         self.word_to_ids: Dict[bytes, List[int]] = {} # 缓存已经计算过的词的对应id序列
 
-    def calculate_token_ids(self, word: bytes) -> List[int]:
+    def words_to_ids(self, word: bytes) -> List[int]:
         """
-        将一个bytes根据merges不断合并，得到其token ID序列
+        将一个word根据词表不断合并，得到其token ID序列
         """
         token_ids = []
         # 将每个字节作为独立的bytes对象
@@ -48,6 +43,9 @@ class BPETokenizer:
                 break
             
             # 执行合并
+            # 例如：bytes_list = [b'a', b'b', b'c', b'd']
+            # 合并规则：b'b',b'c' -> b'bc'
+            # 合并后：bytes_list = [b'a', b'bc', b'd']
             bytes_list[min_merge_pos:min_merge_pos + 2] = [bytes_list[min_merge_pos] + bytes_list[min_merge_pos + 1]]
         
         # 出循环说明已经合并完成，开始翻译为ids
@@ -57,7 +55,7 @@ class BPETokenizer:
                 token_ids.append(id)
             except KeyError:
                 # 如果没有找到对应的ID，可能是未训练的token,暂时不处理
-                print(f"Warning: Token {part} not found in vocabulary.")
+                print(f"Token {part} 不在词表中.")
                 pass
         return token_ids
 
@@ -75,7 +73,7 @@ class BPETokenizer:
                 yield from self.word_to_ids[word]
             else:
                 # 计算该词对应token ID序列
-                token_ids = self.calculate_token_ids(word)
+                token_ids = self.words_to_ids(word)
                 self.word_to_ids[word] = token_ids
                 yield from token_ids
 
@@ -95,7 +93,7 @@ class BPETokenizer:
                 ids.extend(self.word_to_ids[word])
             else:
                 # 计算该词对应token ID序列
-                token_ids = self.calculate_token_ids(word)
+                token_ids = self.words_to_ids(word)
                 self.word_to_ids[word] = token_ids  # 缓存结果
                 ids.extend(token_ids)
         return ids
@@ -118,44 +116,29 @@ class BPETokenizer:
         return text_bytes.decode('utf-8', errors='ignore')
 
 if __name__ == "__main__":
-    # # 示例：使用并行预分词训练BPE
-    # file_path = "data/TinyStoriesV2-GPT4-valid.txt"  # 数据集文件路径
-    # special_tokens = ["<|endoftext|>"]
-    # # 并行预分词
-    # start_time = time.time()
-    # pre_token_freq = parallel_preprocess_from_file(
-    #     file_path=file_path,
-    #     special_tokens=special_tokens,
-    #     desired_num_chunks=4  # 使用8个进程
-    # )
-    # end_time = time.time()
-    # print(f"并行预分词时间: {end_time - start_time}秒")
-    
-    # # 训练BPE
-    # start_time = time.time()
-    # vocab, merges = train_bpe(
-    #     vocab_size=500,
-    #     special_tokens=special_tokens,
-    #     pre_token_freq=pre_token_freq  # 传入预计算的频率
-    # )
-    # end_time = time.time()
-    # print(f"BPE训练时间: {end_time - start_time}秒")
-
-    # tokenizer = BPETokenizer(vocab, merges, special_tokens)
-    # print(tokenizer.encode("Hello, world! <|endoftext|> This is a test."))
-    # print(tokenizer.decode(tokenizer.encode("Hello, world! <|endoftext|> This is a test.")))
-
-    tokenizer = get_tokenizer_from_vocab_merges_path(
-        vocab_path=VOCAB_PATH,
-        merges_path=MERGES_PATH,
-        special_tokens=["<|endoftext|>", "<|endoftext|><|endoftext|>"],
+    # 示例：使用并行预分词训练BPE
+    file_path = "data/TinyStoriesV2-GPT4-valid.txt"  # 数据集文件路径
+    special_tokens = ["<|endoftext|>"]
+    # 并行预分词
+    start_time = time.time()
+    pre_token_freq = parallel_preprocess_from_file(
+        file_path=file_path,
+        special_tokens=special_tokens,
+        desired_num_chunks=4  # 使用8个进程
     )
-    test_string = "Hello, how <|endoftext|><|endoftext|> are you?<|endoftext|>"
+    end_time = time.time()
+    print(f"并行预分词时间: {end_time - start_time}秒")
+    
+    # 训练BPE
+    start_time = time.time()
+    vocab, merges = train_bpe(
+        vocab_size=500,
+        special_tokens=special_tokens,
+        pre_token_freq=pre_token_freq  # 传入预计算的频率
+    )
+    end_time = time.time()
+    print(f"BPE训练时间: {end_time - start_time}秒")
 
-    ids = tokenizer.encode(test_string)
-    tokenized_string = [tokenizer.decode([x]) for x in ids]
-    # Ensure the double <|endoftext|><|endoftext|> is preserved as a single token
-    assert tokenized_string.count("<|endoftext|>") == 1
-    assert tokenized_string.count("<|endoftext|><|endoftext|>") == 1
-    # Test roundtrip
-    assert tokenizer.decode(ids) == test_string
+    tokenizer = BPETokenizer(vocab, merges, special_tokens)
+    print(tokenizer.encode("Hello, world! <|endoftext|> This is a test."))
+    print(tokenizer.decode(tokenizer.encode("Hello, world! <|endoftext|> This is a test.")))

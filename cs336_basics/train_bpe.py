@@ -127,7 +127,7 @@ def train_bpe(
 
 
 
-# 并行预分词主函数
+# 并行预分词, 返回预分词频率
 def parallel_preprocess_from_file(
     file_path,
     special_tokens,

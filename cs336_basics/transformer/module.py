@@ -221,14 +221,6 @@ class RoPE(nn.Module):
         x_rot = rearrange([a_rot, b_rot], "two ... s d_k -> ... s (d_k two)", two=2)
         return x_rot.to(x.dtype)
 
-def softmax(x: Tensor,i: int) -> Tensor:
-    # 获取第i个纬度的最大值张量
-    max_vals = x.max(dim=i, keepdim=True).values
-    # 计算指数
-    exp_x = torch.exp(x - max_vals)
-    # 计算softmax
-    return exp_x / exp_x.sum(dim=i, keepdim=True)
-
 def scaled_dot_product_attention(Q: Tensor, K: Tensor, V: Tensor, mask: Optional[Tensor] = None) -> Tensor:
     # Q: (batch_size, ..., seq_len_q, d_k)
     # K: (batch_size, ..., seq_len_k, d_k)

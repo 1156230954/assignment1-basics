@@ -9,12 +9,13 @@ from .transformer.module import Embedding
 from .transformer.module import RMSNorm
 from .transformer.module import PositionWiseFFN
 from .transformer.module import RoPE
-from .transformer.module import softmax
+from .transformer.nn_utils import softmax
 from .transformer.module import scaled_dot_product_attention
 from .transformer.module import MultiheadSelfAttention
 from .transformer.module import MultiheadSelfAttentionWithRoPE
 from .transformer.module import TransformerBlock
 from .transformer.module import TransformerLM
+from .transformer.nn_utils import cross_entropy
 
 __all__ = [
     "BPETokenizer",
@@ -37,4 +38,5 @@ __all__ = [
     "MultiheadSelfAttentionWithRoPE",
     "TransformerBlock",
     "TransformerLM",
+    "cross_entropy",
 ]
